@@ -1,0 +1,8 @@
+{
+  "host": { "name": "Host", "color": "#e8b923" },
+  "members": [
+    { "name": "Orion",  "model": "Claude",  "role": "Builder",    "color": "#3b82f6" },
+    { "name": "Vesper", "model": "ChatGPT", "role": "Skeptic",    "color": "#ef4444" },
+    { "name": "Lumen",  "model": "Gemini",  "role": "Summarizer", "color": "#10b981" }
+  ]
+}

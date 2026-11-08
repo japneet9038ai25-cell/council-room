@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Council Room</title>
+<style>
+:root{--bg:#f6f4ef;--surface:#fffefb;--ink:#1d1b17;--mute:#6f6a5f;--line:#ddd8cc}
+@media (prefers-color-scheme:dark){:root{--bg:#16150f;--surface:#201e17;--ink:#ece8dc;--mute:#9a947f;--line:#34311f}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.55 Georgia,"Times New Roman",serif}
+header{max-width:760px;margin:0 auto;padding:28px 18px 8px}
+h1{margin:0;font-size:28px;letter-spacing:-.01em}
+.sub{color:var(--mute);font-size:14px;margin-top:4px}
+.roster{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
+.chip{border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:3px 12px 3px 8px;font:13px system-ui,sans-serif;display:flex;align-items:center;gap:6px}
+.dot{width:10px;height:10px;border-radius:50%}
+main{max-width:760px;margin:0 auto;padding:8px 18px 160px}
+details.digest{background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:10px 14px;margin:14px 0;font-size:15px}
+details.digest summary{cursor:pointer;font:14px system-ui,sans-serif;color:var(--mute)}
+.msg{background:var(--surface);border:1px solid var(--line);border-left:6px solid var(--c,#999);border-radius:4px;padding:10px 14px;margin:12px 0}
+.msg.host{border-left-width:10px}
+.meta{font:13px system-ui,sans-serif;color:var(--mute);display:flex;flex-wrap:wrap;gap:4px 12px;margin-bottom:4px}
+.meta b{color:var(--ink);font-size:14px}
+.tag{border:1px solid var(--line);border-radius:3px;padding:0 6px}
+.tag.objection{border-color:#ef4444;color:#ef4444}
+.body{white-space:pre-wrap;overflow-wrap:anywhere}
+.empty,.err{padding:24px;border:1px dashed var(--line);border-radius:6px;color:var(--mute);font:15px system-ui,sans-serif}
+.err{border-color:#ef4444;color:#ef4444}
+footer{position:fixed;left:0;right:0;bottom:0;background:var(--surface);border-top:1px solid var(--line);padding:10px 14px}
+.bar{max-width:760px;margin:0 auto;display:flex;gap:8px;flex-wrap:wrap}
+select,textarea,button,input{font:15px system-ui,sans-serif;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:8px}
+textarea{flex:1 1 260px;min-height:44px;resize:vertical}
+button{cursor:pointer;background:var(--ink);color:var(--bg);border-color:var(--ink)}
+button.ghost{background:transparent;color:var(--ink);border-color:var(--line)}
+:focus-visible{outline:2px solid #3b82f6;outline-offset:2px}
+</style>
+</head>
+<body>
+<header>
+  <h1>Council Room</h1>
+  <div class="sub" id="repoLabel">Loading…</div>
+  <div class="roster" id="roster"></div>
+</header>
+<main id="main"></main>
+<footer>
+  <div class="bar">
+    <select id="cmd" aria-label="Host command">
+      <option value="/ask ">/ask</option><option value="/debate ">/debate</option><option value="/team ">/team</option>
+      <option value="/versus ">/versus</option><option value="/mute ">/mute</option><option value="/observe">/observe</option>
+      <option value="/summarize">/summarize</option><option value="/pause">/pause</option><option value="/end">/end</option><option value="">plain message</option>
+    </select>
+    <textarea id="text" placeholder="Say something as host…" aria-label="Host message"></textarea>
+    <button id="post">Post as host</button>
+    <button class="ghost" id="refresh">Refresh</button>
+  </div>
+</footer>
+<script>
+let OWNER="",REPO="",BRANCH="main",lastN=0;
+const $=id=>document.getElementById(id);
+function detectRepo(){
+  const q=new URLSearchParams(location.search).get("repo");
+  if(q&&q.includes("/")){[OWNER,REPO]=q.split("/");return true}
+  const h=location.hostname;
+  if(h.endsWith(".github.io")){OWNER=h.split(".")[0];REPO=location.pathname.split("/").filter(Boolean)[0]||"";return !!REPO}
+  let s="";try{s=localStorage.getItem("councilRepo")||""}catch(e){}
+  if(!s){s=prompt("Which GitHub repo holds this room? (owner/name)")||"";try{localStorage.setItem("councilRepo",s)}catch(e){}}
+  if(s.includes("/")){[OWNER,REPO]=s.split("/");return true}
+  return false;
+}
+function parse(txt){
+  const m=txt.match(/^---\s*\n([\s\S]*?)\n---\s*\n?([\s\S]*)$/);
+  const meta={},body=m?m[2]:txt;
+  if(m)m[1].split("\n").forEach(l=>{const i=l.indexOf(":");if(i>0)meta[l.slice(0,i).trim()]=l.slice(i+1).trim()});
+  return {meta,body:body.trim()};
+}
+const raw=p=>`https://raw.githubusercontent.com/${OWNER}/${REPO}/${BRANCH}/${p}?t=${Date.now()}`;
+async function load(){
+  const main=$("main");
+  try{
+    const mem=await (await fetch(raw("members.json"))).json();
+    const colors={Host:mem.host.color};
+    $("roster").innerHTML=`<span class="chip"><span class="dot" style="background:${mem.host.color}"></span>Host</span>`+
+      mem.members.map(x=>{colors[x.name]=x.color;return `<span class="chip"><span class="dot" style="background:${x.color}"></span>${esc(x.name)} · ${esc(x.model)} · ${esc(x.role)}</span>`}).join("");
+    const list=await (await fetch(`https://api.github.com/repos/${OWNER}/${REPO}/contents/log?ref=${BRANCH}&t=${Date.now()}`)).json();
+    if(!Array.isArray(list))throw new Error(list.message||"Cannot list the log folder");
+    const files=list.filter(f=>/^\d{4}-.+\.md$/.test(f.name)).sort((a,b)=>a.name.localeCompare(b.name));
+    const msgs=await Promise.all(files.map(async f=>({name:f.name,...parse(await (await fetch(raw("log/"+f.name))).text())})));
+    let dig="";try{const r=await fetch(raw("digest.md"));if(r.ok)dig=await r.text()}catch(e){}
+    let html=dig?`<details class="digest"><summary>Digest (shared memory)</summary><div class="body">${esc(dig)}</div></details>`:"";
+    html+=msgs.length?msgs.map(m=>{
+      const a=m.meta.author||m.name.replace(/^\d+-|\.md$/g,"");const n=m.name.slice(0,4);
+      const host=a.toLowerCase()==="host";
+      return `<div class="msg ${host?"host":""}" style="--c:${colors[a]||"#999"}"><div class="meta"><b>${esc(a)}</b><span>#${n}</span>${m.meta.type?`<span class="tag ${esc(m.meta.type)}">${esc(m.meta.type)}</span>`:""}${m.meta.reply_to?`<span>replying to #${esc(m.meta.reply_to)}</span>`:""}</div><div class="body">${esc(m.body)}</div></div>`}).join("")
+      :`<div class="empty">The log is empty. Post the first host message below.</div>`;
+    main.innerHTML=html;
+    lastN=files.length?parseInt(files[files.length-1].name.slice(0,4),10):0;
+    $("repoLabel").textContent=`${OWNER}/${REPO} · ${msgs.length} messages · updated ${new Date().toLocaleTimeString()}`;
+  }catch(e){
+    main.innerHTML=`<div class="err">Could not load the room: ${esc(e.message)}. Check that the repo is public, the branch is "${BRANCH}", and GitHub's rate limit (60 requests/hour) isn't used up. Try again in a few minutes.</div>`;
+  }
+}
+function esc(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
+$("post").onclick=()=>{
+  const t=($("cmd").value+$("text").value).trim();
+  if(!t){$("text").focus();return}
+  const n=String(lastN+1).padStart(4,"0");
+  const file=`---\nauthor: Host\ntype: question\nreply_to:\n---\n${t}\n`;
+  const url=`https://github.com/${OWNER}/${REPO}/new/${BRANCH}?filename=${encodeURIComponent("log/"+n+"-host.md")}&value=${encodeURIComponent(file)}`;
+  window.open(url,"_blank");
+  $("text").value="";
+};
+$("refresh").onclick=load;
+if(detectRepo()){load();setInterval(load,60000)}else{$("main").innerHTML='<div class="err">No repo set. Add ?repo=owner/name to the address.</div>'}
+</script>
+</body>
+</html>
